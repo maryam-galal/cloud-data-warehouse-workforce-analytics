@@ -1,220 +1,146 @@
 -- ============================================
--- LOAD / REFRESH DIMENSIONS USING UPSERT
--- Safe to run repeatedly,dimensions should not blindly insert duplicates for every refresh.
+-- CREATE DW SCHEMA
 -- ============================================
 
+CREATE SCHEMA IF NOT EXISTS dw;
+
+
+-- ============================================
 -- DIM_DATE
-INSERT INTO dw.dim_date (
-    date_key,
-    full_date,
-    day_of_month,
-    month_number,
-    month_name,
-    quarter_number,
-    year_number,
-    week_of_year,
-    weekday_number,
-    weekday_name,
-    is_weekend
-)
-SELECT
-    TO_CHAR(d, 'YYYYMMDD')::INT,
-    d::DATE,
-    EXTRACT(DAY FROM d)::INT,
-    EXTRACT(MONTH FROM d)::INT,
-    TRIM(TO_CHAR(d, 'Month'))::VARCHAR(20),
-    EXTRACT(QUARTER FROM d)::INT,
-    EXTRACT(YEAR FROM d)::INT,
-    EXTRACT(WEEK FROM d)::INT,
-    EXTRACT(DOW FROM d)::INT,
-    TRIM(TO_CHAR(d, 'Day'))::VARCHAR(20),
-    CASE WHEN EXTRACT(DOW FROM d) IN (0, 6) THEN TRUE ELSE FALSE END
-FROM generate_series('2025-01-01'::DATE, '2027-12-31'::DATE, INTERVAL '1 day') AS d
-ON CONFLICT (date_key)
-DO NOTHING;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_date (
+    date_key INT PRIMARY KEY,
+    full_date DATE NOT NULL,
+    day_of_month INT,
+    month_number INT,
+    month_name VARCHAR(20),
+    quarter_number INT,
+    year_number INT,
+    week_of_year INT,
+    weekday_number INT,
+    weekday_name VARCHAR(20),
+    is_weekend BOOLEAN
+);
 
 
+-- ============================================
 -- DIM_DEPARTMENT
-INSERT INTO dw.dim_department (
-    department_id,
-    department_name,
-    department_description
-)
-SELECT
-    department_id,
-    department_name,
-    department_description
-FROM staging.stg_department
-ON CONFLICT (department_id)
-DO UPDATE SET
-    department_name = EXCLUDED.department_name,
-    department_description = EXCLUDED.department_description;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_department (
+    department_key SERIAL PRIMARY KEY,
+    department_id INT NOT NULL,
+    department_name VARCHAR(100),
+    department_description TEXT,
+
+    CONSTRAINT uq_dim_department_source UNIQUE (department_id)
+);
 
 
+-- ============================================
 -- DIM_ROLE
-INSERT INTO dw.dim_role (
-    role_id,
-    role_name,
-    role_family,
-    seniority_level
-)
-SELECT
-    role_id,
-    role_name,
-    role_family,
-    seniority_level
-FROM staging.stg_role
-ON CONFLICT (role_id)
-DO UPDATE SET
-    role_name = EXCLUDED.role_name,
-    role_family = EXCLUDED.role_family,
-    seniority_level = EXCLUDED.seniority_level;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_role (
+    role_key SERIAL PRIMARY KEY,
+    role_id INT NOT NULL,
+    role_name VARCHAR(100),
+    role_family VARCHAR(100),
+    seniority_level VARCHAR(50),
+
+    CONSTRAINT uq_dim_role_source UNIQUE (role_id)
+);
 
 
+-- ============================================
 -- DIM_SKILL
-INSERT INTO dw.dim_skill (
-    skill_id,
-    skill_name,
-    category
-)
-SELECT
-    skill_id,
-    skill_name,
-    category
-FROM staging.stg_skill
-ON CONFLICT (skill_id)
-DO UPDATE SET
-    skill_name = EXCLUDED.skill_name,
-    category = EXCLUDED.category;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_skill (
+    skill_key SERIAL PRIMARY KEY,
+    skill_id INT NOT NULL,
+    skill_name VARCHAR(100),
+    category VARCHAR(100),
+
+    CONSTRAINT uq_dim_skill_source UNIQUE (skill_id)
+);
 
 
+-- ============================================
 -- DIM_PROJECT
-INSERT INTO dw.dim_project (
-    project_id,
-    project_name,
-    description,
-    manager_id,
-    planned_budget,
-    actual_cost,
-    start_date,
-    end_date,
-    deadline,
-    status,
-    priority
-)
-SELECT
-    project_id,
-    project_name,
-    description,
-    manager_id,
-    planned_budget,
-    actual_cost,
-    start_date,
-    end_date,
-    deadline,
-    status,
-    priority
-FROM staging.stg_project
-ON CONFLICT (project_id)
-DO UPDATE SET
-    project_name = EXCLUDED.project_name,
-    description = EXCLUDED.description,
-    manager_id = EXCLUDED.manager_id,
-    planned_budget = EXCLUDED.planned_budget,
-    actual_cost = EXCLUDED.actual_cost,
-    start_date = EXCLUDED.start_date,
-    end_date = EXCLUDED.end_date,
-    deadline = EXCLUDED.deadline,
-    status = EXCLUDED.status,
-    priority = EXCLUDED.priority;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_project (
+    project_key SERIAL PRIMARY KEY,
+    project_id INT NOT NULL,
+    project_name VARCHAR(150),
+    description TEXT,
+    manager_id INT,
+    planned_budget NUMERIC(12, 2),
+    actual_cost NUMERIC(12, 2),
+    start_date DATE,
+    end_date DATE,
+    deadline DATE,
+    status VARCHAR(50),
+    priority VARCHAR(50),
+
+    CONSTRAINT uq_dim_project_source UNIQUE (project_id)
+);
 
 
+-- ============================================
 -- DIM_EMPLOYEE
-INSERT INTO dw.dim_employee (
-    employee_id,
-    full_name,
-    email,
-    department_key,
-    role_key,
-    manager_id,
-    total_hours_per_week,
-    rewarding_indicator,
-    join_date,
-    employment_status
-)
-SELECT
-    e.employee_id,
-    e.full_name,
-    e.email,
-    dd.department_key,
-    dr.role_key,
-    e.manager_id,
-    e.total_hours_per_week,
-    e.rewarding_indicator,
-    e.join_date,
-    e.employment_status
-FROM staging.stg_employee e
-LEFT JOIN dw.dim_department dd
-    ON e.department_id = dd.department_id
-LEFT JOIN dw.dim_role dr
-    ON e.role_id = dr.role_id
-ON CONFLICT (employee_id)
-DO UPDATE SET
-    full_name = EXCLUDED.full_name,
-    email = EXCLUDED.email,
-    department_key = EXCLUDED.department_key,
-    role_key = EXCLUDED.role_key,
-    manager_id = EXCLUDED.manager_id,
-    total_hours_per_week = EXCLUDED.total_hours_per_week,
-    rewarding_indicator = EXCLUDED.rewarding_indicator,
-    join_date = EXCLUDED.join_date,
-    employment_status = EXCLUDED.employment_status;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_employee (
+    employee_key SERIAL PRIMARY KEY,
+    employee_id INT NOT NULL,
+    full_name VARCHAR(150),
+    email VARCHAR(150),
+    department_key INT,
+    role_key INT,
+    manager_id INT,
+    total_hours_per_week NUMERIC(5, 2),
+    rewarding_indicator NUMERIC(5, 2),
+    join_date DATE,
+    employment_status VARCHAR(50),
+
+    CONSTRAINT uq_dim_employee_source UNIQUE (employee_id),
+
+    CONSTRAINT fk_dim_employee_department
+        FOREIGN KEY (department_key)
+        REFERENCES dw.dim_department(department_key),
+
+    CONSTRAINT fk_dim_employee_role
+        FOREIGN KEY (role_key)
+        REFERENCES dw.dim_role(role_key)
+);
 
 
+-- ============================================
 -- DIM_TASK
-INSERT INTO dw.dim_task (
-    task_id,
-    project_key,
-    owner_employee_id,
-    task_name,
-    description,
-    status,
-    progress_percent,
-    estimated_hours,
-    actual_hours,
-    priority,
-    start_date,
-    deadline,
-    completed_at
-)
-SELECT
-    t.task_id,
-    dp.project_key,
-    t.owner_employee_id,
-    t.task_name,
-    t.description,
-    t.status,
-    t.progress_percent,
-    t.estimated_hours,
-    t.actual_hours,
-    t.priority,
-    t.start_date,
-    t.deadline,
-    t.completed_at
-FROM staging.stg_task t
-LEFT JOIN dw.dim_project dp
-    ON t.project_id = dp.project_id
-ON CONFLICT (task_id)
-DO UPDATE SET
-    project_key = EXCLUDED.project_key,
-    owner_employee_id = EXCLUDED.owner_employee_id,
-    task_name = EXCLUDED.task_name,
-    description = EXCLUDED.description,
-    status = EXCLUDED.status,
-    progress_percent = EXCLUDED.progress_percent,
-    estimated_hours = EXCLUDED.estimated_hours,
-    actual_hours = EXCLUDED.actual_hours,
-    priority = EXCLUDED.priority,
-    start_date = EXCLUDED.start_date,
-    deadline = EXCLUDED.deadline,
-    completed_at = EXCLUDED.completed_at;
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS dw.dim_task (
+    task_key SERIAL PRIMARY KEY,
+    task_id INT NOT NULL,
+    project_key INT,
+    owner_employee_id INT,
+    task_name VARCHAR(150),
+    description TEXT,
+    status VARCHAR(50),
+    progress_percent NUMERIC(5, 2),
+    estimated_hours NUMERIC(8, 2),
+    actual_hours NUMERIC(8, 2),
+    priority VARCHAR(50),
+    start_date DATE,
+    deadline DATE,
+    completed_at TIMESTAMP,
+
+    CONSTRAINT uq_dim_task_source UNIQUE (task_id),
+
+    CONSTRAINT fk_dim_task_project
+        FOREIGN KEY (project_key)
+        REFERENCES dw.dim_project(project_key)
+);
